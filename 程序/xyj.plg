@@ -1,0 +1,16 @@
+<html>
+<body>
+<pre>
+<h1>礦ision Build Log</h1>
+<h2>Project:</h2>
+E:\360云盘\00000待开发项目\洗衣机电机正反转\程序\xyj.uvproj
+Project File Date:  03/10/2015
+
+<h2>Output:</h2>
+Build target 'Target 1'
+assembling STARTUP.A51...
+compiling xyj.c...
+linking...
+Program Size: data=48.6 xdata=0 code=1942
+creating hex file from "xyj"...
+"xyj" - 0 Error(s), 0 Warning(s).

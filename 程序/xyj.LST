@@ -1,0 +1,494 @@
+C51 COMPILER V9.54   XYJ                                                                   12/19/2018 16:30:33 PAGE 1   
+
+
+C51 COMPILER V9.54, COMPILATION OF MODULE XYJ
+OBJECT MODULE PLACED IN xyj.OBJ
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE xyj.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND TABS(2)
+
+line level    source
+
+   1          /***************************头文件***********************/ 
+   2          #include <reg52.h> 
+   3          #include <intrins.h> 
+   4          /************************数据类型宏定义******************/ 
+   5          #define uchar unsigned char 
+   6          #define uint unsigned int 
+   7          /***********************使能、禁止宏定义*****************/ 
+   8          #define Enable(); EA=1; 
+   9          #define Disable();EA=0; 
+  10          /**********************电机控制宏定义********************/ 
+  11          #define ZHENGZHUAN 0 
+  12          #define STOP 1 
+  13          #define FANZHUAN 2 
+  14          #define ZhengZhuan(); PIN_Motor_A = 0; PIN_Motor_B = 1; 
+  15          #define Stop(); PIN_Motor_A = 1; PIN_Motor_B = 1; 
+  16          #define FanZhuan(); PIN_Motor_A = 1; PIN_Motor_B = 0; 
+  17          /*******************暂停、继续控制宏定义*****************/ 
+  18          #define ZanTing(); ET0 = 0; ET1 = 0; Stop(); 
+  19          #define JiXu(); ET0 = 1; ET1 = 1; 
+  20          #define flag_Ok  (flag_XiDi||flag_TuoShui) 
+  21          /*************************管脚定义***********************/ 
+  22          #define lcd P0     //液晶数据口
+  23          
+  24          sbit PIN_JinShui = P2^2; //进水
+  25          sbit PIN_PaiShui = P2^3; //排水
+  26          sbit PIN_Motor_A = P2^4; //电机脚A 
+  27          sbit PIN_Motor_B = P2^5; //电机脚B 
+  28          sbit K_SEL_ChengXu = P1^5; //选择程序键 
+  29          sbit qiangruo = P1^6; //水量选择 
+  30          sbit shuiwei1 = P3^6; // 水位监测
+  31          sbit p32 = P3^2; //   启动/暂停
+  32          sbit rs=P1^1;    //液晶控制引脚
+  33          sbit en=P1^2;
+  34          sbit SPK = P2^0; //报警喇叭
+  35          /*************************数据定义***********************/ 
+  36          uchar flag_SEL_ChengXu; //默认为标准程序， 
+  37           
+  38          bit flag_Run; //运行标志，1为运行 
+  39          bit flag_XiDi; //置洗涤标志 
+  40          bit flag_TuoShui; //脱水标志
+  41          bit flag_PiaoXi;  //漂洗标志  
+  42          bit flag_SEl_QiangRuo; //默认为强洗，1为弱洗 
+  43          
+  44          uchar _50ms; //每50ms加一次的变量 
+  45          uint s,s1; //秒 
+  46          uchar k;
+  47          int counter1=0,counter2=0,counter3=0;  //电机转速控制
+  48          uint T_S; //定时总时间  
+  49          int fen,miao;//剩余时间
+  50          uint t1,t2,t3;     //洗涤、漂洗、甩干时间
+  51          uchar a=15;  //占空比
+  52          uchar mol=0;  //手动模式选择
+  53          uint count;
+  54          /**************************数组定义********************/
+  55          uchar code table0[]="State:          ";
+C51 COMPILER V9.54   XYJ                                                                   12/19/2018 16:30:33 PAGE 2   
+
+  56          
+  57          uchar table7[]="00:00";
+  58          
+  59          
+  60          /*************************延时程序*********************/ 
+  61          void Delay_10ms(uint T1) 
+  62          { 
+  63   1        uint t1,t2; 
+  64   1        for(t1=0;t1<T1;t1++) 
+  65   1        for(t2=0;t2<1250;t2++);//10ms 
+  66   1      } 
+  67          
+  68          
+  69          void delay(uint count)     //1ms延时
+  70          {
+  71   1         uint x,y;
+  72   1         for(x=0;x<count;x++)
+  73   1         for(y=0;y<120;y++);
+  74   1      }
+  75          /*************************液晶驱动程序*************************/
+  76          void w_cmd(uchar com)     //lcd1602写命令
+  77          {
+  78   1        rs=0;
+  79   1        lcd=com;
+  80   1        en=1;
+  81   1        delay(5);
+  82   1        en=0;
+  83   1      }
+  84          
+  85          void w_data(uchar dat)      //lcd1602读数据
+  86          {
+  87   1        rs=1;
+  88   1        lcd=dat;
+  89   1        en=1;
+  90   1        delay(5);
+  91   1        en=0;
+  92   1      }
+  93          
+  94          void w_str(uchar *s)       //lcd1602写字符串
+  95          {
+  96   1          while(*s)  w_data(*s++);
+  97   1      }
+  98          
+  99          void lcd_int()         //lcd1602初始化
+ 100          {
+ 101   1        en=0;
+ 102   1        w_cmd(0x38);
+ 103   1        w_cmd(0x0c);
+ 104   1        w_cmd(0x06);
+ 105   1        w_cmd(0x01);
+ 106   1        w_cmd(0x80+0x00);
+ 107   1        w_str(table0);
+ 108   1        //w_cmd(0xc0+0x00);
+ 109   1       // w_str(table1);
+ 110   1      }
+ 111          
+ 112          
+ 113          /********************中断初始化程序********************/ 
+ 114          void ExInt_Init(void) 
+ 115          { 
+ 116   1        IT0 = 1; 
+ 117   1        EX0 = 1; 
+C51 COMPILER V9.54   XYJ                                                                   12/19/2018 16:30:33 PAGE 3   
+
+ 118   1        IT1 = 1; 
+ 119   1        EX1 = 1; 
+ 120   1      } 
+ 121          /*******************定时器0初始化程序******************/ 
+ 122          void Timer0_Init(void) //其中没ET0是为以后控制暂停用的 
+ 123          { 
+ 124   1        TMOD = TMOD | 0X01; //定时方式1 
+ 125   1        TH0 = 0X3C; //50ms 
+ 126   1        TL0 = 0XB0; 
+ 127   1        TR0 = 1; 
+ 128   1        _50ms = 0; 
+ 129   1        s = 0; 
+ 130   1      } 
+ 131          /*******************定时器1初始化程序******************/ 
+ 132          void Timer1_Init(void) // 
+ 133          { 
+ 134   1        TMOD=TMOD|0x10;
+ 135   1        
+ 136   1        TH1 = ( 65535 - 500 ) / 256;   //1ms 
+ 137   1        TL1 = ( 65535 - 500 ) % 256; 
+ 138   1        //ET1=1;  
+ 139   1        //EA=1;
+ 140   1        TR1=1;  
+ 141   1      
+ 142   1        
+ 143   1      }
+ 144          
+ 145          
+ 146          /*******外部中断0程序为运行或者暂停***********/ 
+ 147          void int0(void) interrupt 0 
+ 148          { 
+ 149   1         if(!p32) 
+ 150   1         { 
+ 151   2           Delay_10ms(1); //延时10ms左右，去抖动 
+ 152   2           if(!p32) 
+ 153   2           { 
+ 154   3            if(!flag_Run)
+ 155   3            { 
+ 156   4                flag_Run = 1; //置运行标志
+ 157   4              
+ 158   4            } 
+ 159   3              
+ 160   3              else if(flag_Ok) 
+ 161   3              { 
+ 162   4                  static bit flag_ZanTing; 
+ 163   4                  flag_ZanTing = ~flag_ZanTing; 
+ 164   4                  if(flag_ZanTing) 
+ 165   4                  {
+ 166   5                  ZanTing();
+ 167   5                 }
+ 168   4                else 
+ 169   4                {JiXu();} 
+ 170   4              } 
+ 171   3            } 
+ 172   2          }
+ 173   1       } 
+ 174          
+ 175          /*******************定时器0中断程序********************/ 
+ 176          void Timer0(void) interrupt 1 
+ 177          { 
+ 178   1         TR0 = 0; //停止计数 
+ 179   1         TH0 = 0X3C; //重装定时器值 
+C51 COMPILER V9.54   XYJ                                                                   12/19/2018 16:30:33 PAGE 4   
+
+ 180   1         TL0 = 0XB0; 
+ 181   1         TR0 = 1; 
+ 182   1         _50ms++; 
+ 183   1         if(_50ms == 20) //1s到 
+ 184   1         { 
+ 185   2             _50ms = 0; 
+ 186   2             
+ 187   2            s++;
+ 188   2            if(s == T_S) //定时到 
+ 189   2            {
+ 190   3             s = 0;        
+ 191   3               flag_XiDi = 0; //清洗涤标志 
+ 192   3             flag_TuoShui= 0; //清脱水标志
+ 193   3             flag_PiaoXi=0; //清漂洗标志
+ 194   3             Stop();
+ 195   3             ET1=0;
+ 196   3            } 
+ 197   2            else
+ 198   2            { 
+ 199   3                ET1=1; //电机控制程序 
+ 200   3              
+ 201   3               
+ 202   3               
+ 203   3               if(miao==0)
+ 204   3               {
+ 205   4                  miao=60;
+ 206   4                fen--;
+ 207   4                if(fen==0)
+ 208   4                  fen=0;
+ 209   4               }
+ 210   3               miao--;
+ 211   3               
+ 212   3            }
+ 213   2          
+ 214   2         } 
+ 215   1      } 
+ 216          
+ 217          /*******************定时器1中断程序********************/ 
+ 218          void Timer1 ( void ) interrupt 3  //定时器1中断函数 0.5ms 
+ 219          { 
+ 220   1        TH1 = ( 65535 - 500) / 256;  
+ 221   1        TL1 = ( 65535 - 500 ) % 256;
+ 222   1        if(flag_XiDi||flag_PiaoXi)     
+ 223   1        {
+ 224   2            count++;
+ 225   2            if(count<16000)
+ 226   2            {
+ 227   3              counter1++;   //d电机控制计数
+ 228   3              if(counter1<=a)
+ 229   3              {
+ 230   4                ZhengZhuan();           
+ 231   4              }
+ 232   3              else if(counter1>a)
+ 233   3              {
+ 234   4                Stop();
+ 235   4              }
+ 236   3              if(counter1==100) counter1=0;
+ 237   3            }
+ 238   2            else if(count<20000)
+ 239   2            {
+ 240   3               Stop();
+ 241   3            }
+C51 COMPILER V9.54   XYJ                                                                   12/19/2018 16:30:33 PAGE 5   
+
+ 242   2            else if(count<36000)
+ 243   2            {
+ 244   3              counter3++;   //d电机控制计数
+ 245   3              if(counter3<=a)
+ 246   3              {
+ 247   4                FanZhuan();           
+ 248   4              }
+ 249   3              else if(counter3>a)
+ 250   3              {
+ 251   4                Stop();
+ 252   4              }
+ 253   3              if(counter3==100) counter3=0;
+ 254   3            }
+ 255   2            else
+ 256   2            {
+ 257   3              count=0;
+ 258   3            }
+ 259   2        
+ 260   2        }
+ 261   1         
+ 262   1      
+ 263   1        if(flag_TuoShui)
+ 264   1        {
+ 265   2          counter2++;   //d电机控制计数
+ 266   2          if(counter2<=40)
+ 267   2          {
+ 268   3            ZhengZhuan();           
+ 269   3          }
+ 270   2          else if(counter2>40)
+ 271   2          {
+ 272   3            Stop();
+ 273   3          }
+ 274   2          if(counter2==100) counter2=0;
+ 275   2        }
+ 276   1      }
+ 277          
+ 278          
+ 279          /******************进水排水**********************/
+ 280          void JinShui()
+ 281          {
+ 282   1        PIN_JinShui = 0; //进水控制 
+ 283   1          PIN_PaiShui = 1;
+ 284   1      }
+ 285          void PaiShui()
+ 286          {
+ 287   1        PIN_JinShui = 1; //pai水控制 
+ 288   1          PIN_PaiShui = 0;
+ 289   1      }
+ 290          /**********************洗涤程序***********************/ 
+ 291          void XiDi(void) 
+ 292          { 
+ 293   1      
+ 294   1            
+ 295   1          JinShui();     //进水
+ 296   1          while(shuiwei1)
+ 297   1          {  w_cmd(0x80+6); 
+ 298   2                w_str(" JinShui"); 
+ 299   2          }                 
+ 300   1           PIN_JinShui = 1; //关进水阀门
+ 301   1             w_cmd(0x80+6); 
+ 302   1              w_str("  XiDi    "); 
+ 303   1           // Timer0_Init(); 
+C51 COMPILER V9.54   XYJ                                                                   12/19/2018 16:30:33 PAGE 6   
+
+ 304   1           ET0=1;
+ 305   1            T_S =t1;
+ 306   1             fen=t1/60;miao=t1%60; 
+ 307   1             
+ 308   1           flag_XiDi=1;
+ 309   1            while(flag_XiDi)
+ 310   1           {   
+ 311   2             table7[0]=fen/10+0x30;
+ 312   2             table7[1]=fen%10+0x30;
+ 313   2             table7[3]=miao/10+0x30;
+ 314   2             table7[4]=miao%10+0x30;
+ 315   2             w_cmd(0xc0+7); 
+ 316   2             w_str(table7);
+ 317   2             
+ 318   2          }
+ 319   1           
+ 320   1          ET0=0;
+ 321   1          w_cmd(0xc0+7);  
+ 322   1           w_str("00:00");
+ 323   1           
+ 324   1            PaiShui();    //排水
+ 325   1            while(!shuiwei1)
+ 326   1            {
+ 327   2              w_cmd(0x80+7);  
+ 328   2                    w_str(" PaiShui");
+ 329   2            }
+ 330   1          
+ 331   1           PIN_PaiShui = 1; //关排水阀门   
+ 332   1      
+ 333   1        
+ 334   1      } 
+ 335          /*****************漂洗***************************/
+ 336          void PiaoXi()
+ 337          {
+ 338   1        
+ 339   1              
+ 340   1            JinShui();     //进水
+ 341   1          while(shuiwei1)
+ 342   1          {  w_cmd(0x80+6); 
+ 343   2                w_str(" JinShui"); 
+ 344   2          }   
+ 345   1          PIN_JinShui = 1; //关进水阀门
+ 346   1            w_cmd(0x80+7);  
+ 347   1                w_str(" PiaoXi"); 
+ 348   1           ET0=1;
+ 349   1           T_S =t2;
+ 350   1           fen=t2/60;miao=t2%60;       
+ 351   1           flag_PiaoXi=1;
+ 352   1           
+ 353   1            while(flag_PiaoXi)
+ 354   1           {   
+ 355   2             table7[0]=fen/10+0x30;   //显示剩余时间
+ 356   2             table7[1]=fen%10+0x30;
+ 357   2             table7[3]=miao/10+0x30;
+ 358   2             table7[4]=miao%10+0x30;
+ 359   2             w_cmd(0xc0+7); 
+ 360   2             w_str(table7);      
+ 361   2           }
+ 362   1           ET0=0;
+ 363   1           w_cmd(0xc0+7); 
+ 364   1           w_str("00:00");
+ 365   1            PaiShui();    //排水
+C51 COMPILER V9.54   XYJ                                                                   12/19/2018 16:30:33 PAGE 7   
+
+ 366   1            while(!shuiwei1)
+ 367   1            {
+ 368   2              w_cmd(0x80+7);  
+ 369   2                    w_str(" PaiShui");
+ 370   2            }
+ 371   1      
+ 372   1           PIN_PaiShui = 1; //关排水阀门    
+ 373   1        
+ 374   1      }
+ 375          /*****************甩干****************************/
+ 376          void TuoShui()
+ 377          {
+ 378   1        w_cmd(0x80+7);  
+ 379   1        w_str("TuoShui");
+ 380   1        PIN_JinShui = 1; //pai水控制 
+ 381   1          PIN_PaiShui = 0;
+ 382   1        flag_TuoShui=1;
+ 383   1          ET0=1;
+ 384   1        T_S =t3;
+ 385   1        fen=t3/60;miao=t3%60;        
+ 386   1        
+ 387   1        while(flag_TuoShui)
+ 388   1        {  
+ 389   2          table7[0]=fen/10+0x30;    //显示剩余时间
+ 390   2          table7[1]=fen%10+0x30;
+ 391   2          table7[3]=miao/10+0x30;
+ 392   2            table7[4]=miao%10+0x30;
+ 393   2          w_cmd(0xc0+7);  
+ 394   2           w_str(table7);      
+ 395   2        }
+ 396   1        //PIN_PaiShui = 1;
+ 397   1      } 
+ 398          /**********************报警程序************************/ 
+ 399          void BaoJing(void) 
+ 400          {  
+ 401   1        uint i, j;
+ 402   1        for (i = 0; i < 200; i++)
+ 403   1        {
+ 404   2               SPK = 0; for (j = 0; j < 100; j++);
+ 405   2               SPK = 1; for (j = 0; j < 100; j++);
+ 406   2          }  
+ 407   1      }
+ 408          /**********************按键程序选择*******************/
+ 409          void keyscan()
+ 410          {
+ 411   1        
+ 412   1        if(K_SEL_ChengXu==0)     //模式选择  
+ 413   1        {
+ 414   2          delay(10);    
+ 415   2          if(K_SEL_ChengXu==0)
+ 416   2          {
+ 417   3            while(!K_SEL_ChengXu);
+ 418   3          
+ 419   3            mol++;
+ 420   3            if(mol>1) mol=0;
+ 421   3          }
+ 422   2        }
+ 423   1        if(qiangruo==0)    //模式选择  
+ 424   1        {
+ 425   2          delay(10);    
+ 426   2          if(qiangruo==0)
+ 427   2          {
+C51 COMPILER V9.54   XYJ                                                                   12/19/2018 16:30:33 PAGE 8   
+
+ 428   3            while(!qiangruo);
+ 429   3            flag_SEl_QiangRuo=~flag_SEl_QiangRuo;
+ 430   3            if(flag_SEl_QiangRuo) a=10;
+ 431   3            if(!flag_SEl_QiangRuo) a=20;      
+ 432   3          }
+ 433   2        }   
+ 434   1      }
+ 435          /************************主程序************************/ 
+ 436          void main() 
+ 437          { 
+ 438   1        
+ 439   1        uchar i; 
+ 440   1        ExInt_Init(); //外中断初始化 
+ 441   1        lcd_int();
+ 442   1        Timer0_Init();
+ 443   1        Timer1_Init(); 
+ 444   1      //  ET0 = 1; 
+ 445   1        Enable(); //开总中断 
+ 446   1        while(1) 
+ 447   1         {
+ 448   2            
+ 449   2          
+ 450   2                 w_cmd(0x80+0x07);
+ 451   2                    w_str("xyj");
+ 452   2               
+ 453   2           }
+ 454   1             
+ 455   1         
+ 456   1      }
+*** WARNING C280 IN LINE 439 OF xyj.c: 'i': unreferenced local variable
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1236    ----
+   CONSTANT SIZE    =     72    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     35       4
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      6    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  1 WARNING(S),  0 ERROR(S)
